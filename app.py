@@ -1,35 +1,57 @@
 from flask import Flask, request, jsonify
 from flask_bcrypt import Bcrypt
+import psycopg2
+import os
 
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
 
-# Fake user storage
-users = {}
+# Connect to PostgreSQL using environment variables
+conn = psycopg2.connect(
+    host=os.environ.get('DB_HOST'),
+    dbname=os.environ.get('DB_NAME'),
+    user=os.environ.get('DB_USER'),
+    password=os.environ.get('DB_PASSWORD')
+)
+cursor = conn.cursor()
 
-@app.route("/register", methods=["POST"])
+# Create table if it doesn't exist
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL
+)
+""")
+conn.commit()
+
+@app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
-    username = data["username"]
-    password = data["password"]
+    username = data['username']
+    password = data['password']
 
-    if username in users:
-        return jsonify({"error": "User already exists"}), 400
+    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+    if cursor.fetchone():
+        return jsonify({'message': 'User already exists'}), 400
 
-    hashed_pw = bcrypt.generate_password_hash(password).decode("utf-8")
-    users[username] = hashed_pw
-    return jsonify({"message": "User registered successfully"}), 201
+    hashed = bcrypt.generate_password_hash(password).decode('utf-8')
+    cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, hashed))
+    conn.commit()
+    return jsonify({'message': 'User registered successfully'})
 
-@app.route("/login", methods=["POST"])
+@app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data["username"]
-    password = data["password"]
+    username = data['username']
+    password = data['password']
 
-    hashed_pw = users.get(username)
-    if hashed_pw and bcrypt.check_password_hash(hashed_pw, password):
-        return jsonify({"message": "Login successful"}), 200
-    return jsonify({"error": "Invalid credentials"}), 401
+    cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
+    result = cursor.fetchone()
 
-if __name__ == "__main__":
+    if result and bcrypt.check_password_hash(result[0], password):
+        return jsonify({'message': 'Login successful'})
+    return jsonify({'message': 'Invalid credentials'}), 401
+name=...
+if name == 'main':
     app.run(host="0.0.0.0", port=5000)
